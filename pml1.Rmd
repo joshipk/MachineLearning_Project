@@ -1,0 +1,143 @@
+---
+title: "Practical Machine Learning Project"
+author: "PJ"
+output: 
+    html_document:
+    keep_md: yes
+    pdf_document: default
+---
+
+## Executive Summary
+This exercise is to analyse weight lifting exercise data and then predict the manner in which exercise is done. 
+
+The data is based on the accelerometer readings on the belt, forearm, arm and dumbell of 6 participants.
+Some exploratory data analysis reveals that there are several attributes with no data. All such attributes are removed to process the data. Appropriate training and test data sets are created using training data set and various types of algorithms are fitted to find out the most optimum prediction on testing data set.
+
+## Exploratory Data Analysis 
+We will load all the required libraries.
+```{r, echo = TRUE, results = "hide", message= FALSE}
+library(AppliedPredictiveModeling)
+library(caret)
+library(rattle)
+library(rpart.plot)
+library(randomForest)
+```
+
+First we will load the train and test data sets which are provided for this assignment.
+```{r}
+# Download data.
+training_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+training_file <- "pml-training.csv"
+#download.file(url= training_url, destfile= training_file, method="curl")
+testing_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+testing_file <- "pml-testing.csv"
+#download.file(url= testing_url, destfile= testing_file, method="curl")
+
+# Read the data treating empty values as NA.
+training <- read.csv(training_file, na.strings=c("NA",""), header=TRUE)
+colnames_train <- colnames(training)
+testing <- read.csv(testing_file, na.strings=c("NA",""), header=TRUE)
+colnames_test <- colnames(testing)
+
+# Verify that the column names (excluding classe and problem_id) are identical in the training and test set.
+all.equal(colnames_train[1:length(colnames_train)-1], colnames_test[1:length(colnames_train)-1])
+```
+Since we need to explore readings taken from belt, forearm, arm, and dumbell, we will filter the data.
+```{r}
+filter = grepl("belt|arm|dumbell|classe", names(training))
+training = training[, filter]
+testing = testing[, filter]
+```
+We will also remove all columns with NA values to get the better accuracy.
+```{r}
+cols.without.na = colSums(is.na(testing)) == 0
+training = training[, cols.without.na]
+testing = testing[, cols.without.na]
+```
+
+##Data Analysis
+We have a large training datset with 19,622 observations and a small test dataset with only 20 rows.
+We will randomly create a new training dataset from the supplied training dataset and remaining training dataset as new testing dataset.
+```{r}
+set.seed(1)
+set1   <- createDataPartition(y = training$classe, p=0.6, list=FALSE)
+training1 <- training[set1,]
+testing1  <- training[-set1,]
+```
+We will analyse this new training set, step by step, and find out the best approach to predict the results.
+First we will apply classification tree approach. We will use caret package here.
+```{r}
+set.seed(1)
+modFit <- train(training1$classe ~ ., data = training1, method="rpart")
+print(modFit, digits=3)
+```
+Let's print the final model results and draw the tree.
+```{r}
+print(modFit$finalModel, digits=3)
+```
+```{r}
+fancyRpartPlot(modFit$finalModel)
+```
+```{r}
+# Now we will predict the exercise type based on this model. We will use our new testing dataset, which is derived from the original training set and print the results.
+predictions <- predict(modFit, newdata=testing1)
+print(confusionMatrix(predictions, testing1$classe), digits=4)
+```
+Here, accuracy is very low, so we will incorporate preprocessing on new training dataset and predict the outcome on new testing dataset.
+```{r}
+set.seed(1)
+modFit <- train(training1$classe ~ .,  preProcess=c("center", "scale"), data = training1, method="rpart")
+print(modFit, digits=3)
+```
+```{r}
+predictions <- predict(modFit, newdata=testing1)
+print(confusionMatrix(predictions, testing1$classe), digits=4)
+```
+We observe that, even after applying preprocessing, there is no improvement in accuracy. So we will apply cross validation method and predict the outcome.
+```{r}
+set.seed(1)
+modFit <- train(training1$classe ~ .,  preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4), data = training1, method="rpart")
+print(modFit, digits=3)
+```
+```{r}
+predictions <- predict(modFit, newdata=testing1)
+print(confusionMatrix(predictions, testing1$classe), digits=4)
+```
+Still there is no improvement in the accuracy. Now we will apply random forest method with preprocessing to analyse the data.
+
+```{r}
+set.seed(1)
+modFit <- train(training1$classe ~ ., method="rf", preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4), data=training1)
+print(modFit, digits=3)
+```
+```{r}
+predictions <- predict(modFit, newdata=testing1)
+print(confusionMatrix(predictions, testing1$classe), digits=4)
+```
+
+##Conclusion
+This model gives quite high accuracy, which in turn gives us a required out of sample error, typically less than 5%. So we will apply this model to the given test dataset to predict the results.
+```{r, results = "hide"}
+print(predict(modFit, newdata=testing))
+pred1 <- predict(modFit, newdata=testing)
+pred1 <- matrix(pred1)
+```
+The prediction results are written to 20 different files for submission.
+```{r}
+path = "./answer"
+pml_write_files = function(x) {
+    n = length(x)
+    for(i in 1: n) {
+        filename = paste0("problem_id_", i, ".txt")
+        write.table(x[i], file=file.path(path, filename), 
+                    quote=FALSE, row.names=FALSE, col.names=FALSE)
+    }
+}
+pml_write_files(pred1)
+```
+
+## Acknowledgements
+The data for this project comes from this source: http://groupware.les.inf.puc-rio.br/har.
+Data is taken from the following paper -
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
